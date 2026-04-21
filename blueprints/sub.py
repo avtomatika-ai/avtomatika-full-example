@@ -1,40 +1,51 @@
 import logging
-from asyncio import sleep
-from os import environ
-from random import random
-from avtomatika import StateMachineBlueprint
+from avtomatika import Blueprint
+from avtomatika.context import ActionFactory
 
 logger = logging.getLogger("blueprints.sub")
+metadata_enrichment_bp = Blueprint(
+    name="metadata_enrichment", api_endpoint="/sub/metadata_enrichment"
+)
 
-# --- Child Blueprint Definition ---
-# This blueprint will be run as a sub-process of the main one.
-sub_blueprint = StateMachineBlueprint(name="metadata_enrichment")
+
+# 1. Inferred state name: 'start' (from function name)
+@metadata_enrichment_bp.handler(is_start=True)
+async def start(job_id: str, actions: ActionFactory):
+    actions.go_to("dispatch_enrichment")
 
 
-@sub_blueprint.handler_for("start", is_start=True)
-async def sub_start(context, actions):
-    """Starts the sub-blueprint and might fail."""
-    logger.info(
-        f"[{context.job_id}] SUB-BLUEPRINT: Starting enrichment for {context.initial_data.get('video_id')}"
+# 2. Conditional routing (.when)
+@metadata_enrichment_bp.handler("dispatch_enrichment").when(
+    "context.initial_data.mode == 'deep_scan'"
+)
+async def dispatch_enrichment_deep(actions: ActionFactory):
+    """Triggered only if mode == 'deep_scan' in initial_data."""
+    actions.dispatch_task(
+        task_type="analyze_file",
+        skill_version="1.0.0",
+        params={"target": "metadata", "deep": True},
+        transitions={"success": "finished", "failure": "failed"},
     )
-    await sleep(0.5)  # Simulate work
-
-    # Introduce a chance of failure (unless in deterministic mode)
-    is_deterministic = environ.get("DETERMINISTIC_BLUEPRINT") == "true"
-    if not is_deterministic and random() < 0.3:  # 30% chance to fail
-        logger.warning(f"[{context.job_id}] SUB-BLUEPRINT: SIMULATING FAILURE.")
-        actions.transition_to("sub_failed")
-    else:
-        actions.transition_to("finished")
 
 
-@sub_blueprint.handler_for("finished", is_end=True)
-async def sub_finished(context, actions):
-    """Completes the sub-blueprint."""
-    logger.info(f"[{context.job_id}] SUB-BLUEPRINT: Finished enrichment.")
+# 3. Default fallback handler (no condition)
+@metadata_enrichment_bp.handler("dispatch_enrichment")
+async def dispatch_enrichment_default(actions: ActionFactory):
+    """Triggered if no other conditions match."""
+    actions.dispatch_task(
+        task_type="analyze_file",
+        skill_version="1.0.0",
+        params={"target": "metadata", "deep": False},
+        transitions={"success": "finished", "failure": "failed"},
+    )
 
 
-@sub_blueprint.handler_for("sub_failed", is_end=True)
-async def sub_failed(context, actions):
-    """A terminal state for the failed sub-blueprint."""
-    logger.info(f"[{context.job_id}] SUB-BLUEPRINT: Failed enrichment.")
+# 4. Final transitions
+@metadata_enrichment_bp.handler("finished", is_end=True)
+async def sub_finished(job_id: str):
+    logger.info(f"[{job_id}] SUB-PROCESS FINISHED.")
+
+
+@metadata_enrichment_bp.handler("failed", is_end=True)
+async def sub_failed(job_id: str):
+    logger.error(f"[{job_id}] SUB-PROCESS FAILED.")

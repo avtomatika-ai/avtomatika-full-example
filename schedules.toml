@@ -3,7 +3,7 @@
 [maintenance_task]
 blueprint = "periodic_maintenance"
 interval_seconds = 60
-enabled = true
+enabled = false
 
 [maintenance_task.initial_data]
 source = "scheduler"

@@ -1,62 +1,53 @@
-"""Avtomatika: Example Worker 3 (CPU, Reliable)
-
-This script simulates another cheaper, CPU-only worker. It is reliable
-and is used along with worker 2 to demonstrate the 'round_robin' dispatch strategy.
-
-To run this worker:
-1. Make sure the orchestrator from `full_example.py` is running.
-2. Set the required environment variables:
-   export WORKER_ID="cpu-worker-02"
-   export WORKER_TOKEN="super-secret-cpu-worker-token-2"
-   export ORCHESTRATOR_URL="http://localhost:8080"
-3. Run this script in a separate terminal:
-   `python workers/cpu_reliable.py`
-"""
+"""Avtomatika: Reliable CPU Worker"""
 
 import asyncio
 import logging
-import random
+from os import environ
+from pydantic import BaseModel, Field
 
-from avtomatika_worker import Worker
+from avtomatika_worker import Worker, SkillInfo
 from avtomatika_worker.config import WorkerConfig
 
 # Configure basic logging
 logging.basicConfig(level=logging.INFO)
-logging.getLogger("asyncio").setLevel(logging.WARNING)
+
+
+class AnalysisParams(BaseModel):
+    """Pydantic model for task parameters."""
+
+    resource_id: str | None = Field(None, description="The ID of the file to analyze")
 
 
 # Configure the worker
 config = WorkerConfig()
-config.COST_PER_SECOND = 0.0001
-config.MAX_CONCURRENT_TASKS = 4
-config.RESOURCES["cpu_cores"] = 4
-config.RESOURCES["gpu_info"] = None  # Explicitly a non-GPU worker
+config.S3_DEFAULT_BUCKET = environ.get("S3_DEFAULT_BUCKET", "avtomatika-payloads")
+config.S3_ENDPOINT_URL = environ.get("S3_ENDPOINT_URL", "http://localhost:9000")
+config.WORKER_ID = environ.get("WORKER_ID")
+config.WORKER_TOKEN = environ.get("WORKER_TOKEN")
+config.COST_PER_SKILL = {"analyze_file": 0.0001}
+config.RESOURCES = {"properties": {"cpu_cores": 8, "ram_gb": 16}}
+
+# Define skills explicitly
+skills = [
+    SkillInfo(name="analyze_file", type="analyze_file", version="1.0.0"),
+]
 
 # Create a worker instance
 worker = Worker(
     worker_type="cpu_worker",
     config=config,
 )
+worker._supported_skills = skills
 
 
-@worker.task("analyze_file")
-async def analyze_file(params: dict, task_id: str, job_id: str, **kwargs):
-    """
-    A reliable handler for the 'analyze_file' task.
-    """
-    logging.info(
-        f"Task {task_id} (Job: {job_id}): starting 'analyze_file' with params {params}"
-    )
-    await asyncio.sleep(random.uniform(0.5, 1.5))
-
-    analysis_data = {
-        "file_name": params.get("file_name"),
-        "size_kb": random.randint(100, 5000),
-        "codec": "cpu_analyzed_by_worker_2",
-    }
-    logging.info(f"Task {task_id} finished successfully.")
-    return {"status": "success", "data": {"analysis": analysis_data}}
+@worker.skill(name="analyze_file", version="1.0.0")
+async def analyze_file(params: AnalysisParams, task_id: str, job_id: str, **kwargs):
+    """A reliable handler for the 'analyze_file' task using Pydantic."""
+    logging.info(f"Task {task_id}: starting 'analyze_file'")
+    await asyncio.sleep(0.5)
+    return {"status": "success", "data": {"analysis": {"status": "ok"}}}
 
 
 if __name__ == "__main__":
+    config.WORKER_PORT = int(environ.get("WORKER_PORT", 8084))
     worker.run_with_health_check()

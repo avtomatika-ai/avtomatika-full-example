@@ -9,11 +9,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install python dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Copy configuration and metadata first
+COPY pyproject.toml .
+COPY README.md .
 
-# Copy the application code
+# Install python dependencies from PyPI
+RUN pip install --no-cache-dir .[test]
+
+# Copy the rest of the application code
 COPY . .
 
 # Default command to run the orchestrator

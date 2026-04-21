@@ -7,96 +7,141 @@ This script demonstrates how an external application interacts with the Orchestr
 3. Polls for status updates and displays a real-time Progress Bar.
 """
 
-from asyncio import run, sleep
+import asyncio
+import json
+import logging
+from datetime import datetime
 from os import environ
 from sys import stdout
 
-from aiohttp import ClientSession, ClientConnectorError
+import aiohttp
 
-# Configuration from environment variables with defaults
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("client")
+
+# Configuration
 API_URL = environ.get("ORCHESTRATOR_URL", "http://localhost:8080")
-CLIENT_TOKEN = environ.get("CLIENT_TOKEN", "user_token_vip")  # Must match example_clients.toml
-BLUEPRINT = environ.get("BLUEPRINT_NAME", "full_showcase")
+CLIENT_TOKEN = environ.get("CLIENT_TOKEN", "user_token_vip")
+BLUEPRINT = "full_showcase"
+
+SCENARIOS = {
+    "1": {
+        "name": "Standard Flow (Transcode -> Parallel Analysis -> Sub-Blueprint -> S3 Report)",
+        "data": {"path": "/videos/movie.mp4", "quality": "high"},
+    },
+    "2": {
+        "name": "Smart Dispatching (Use Hot Cache Target)",
+        "data": {"path": "/videos/ai_gen.mp4", "use_hot_cache": True},
+    },
+    "3": {
+        "name": "Error Handling (Simulate Transient Error)",
+        "data": {"path": "/videos/test.mp4", "trigger": "transient"},
+    },
+    "4": {
+        "name": "Interactive Cancellation (Demo WebSocket Interruption)",
+        "data": {"path": "/videos/cancel_me.mp4", "is_cancellation_demo": True},
+    },
+}
 
 
 async def main():
-    async with ClientSession() as session:
-        # 1. Create Job
-        print(f"🔌 Connecting to {API_URL}...")
+    print("\n--- Avtomatika HLN Interactive Demo ---")
+    for key, scenario in SCENARIOS.items():
+        print(f"{key}. {scenario['name']}")
 
-        initial_data = {
-            "path": "/s3/bucket/input.mp4",
-            "quality": "high",
-            "use_advanced_dispatch": True,
+    choice = input("\nSelect a scenario [1]: ") or "1"
+    selected = SCENARIOS.get(choice, SCENARIOS["1"])
+
+    async with aiohttp.ClientSession() as session:
+        headers = {"X-Client-Token": CLIENT_TOKEN}
+        payload = {
+            "initial_data": selected["data"],
+            "webhook_url": "http://localhost:8000/webhook",
         }
 
-        # In Docker Compose, the orchestrator can reach the webhook-receiver service by its name.
-        webhook_url = environ.get("WEBHOOK_URL", "http://webhook-receiver:8000/webhook")
-
-        headers = {"X-Client-Token": CLIENT_TOKEN}
-
+        print(f"\n🔌 Connecting to {API_URL}...")
         try:
-            # Blueprint endpoint is /api/v1/jobs/full_showcase
+            # The API endpoint is defined in the blueprint itself
             async with session.post(
-                f"{API_URL}/api/v1/jobs/{BLUEPRINT}",
-                json={"initial_data": initial_data, "webhook_url": webhook_url},
-                headers=headers,
+                f"{API_URL}/api/v1/submit/{BLUEPRINT}", json=payload, headers=headers
             ) as resp:
-                if resp.status != 202:
+                if resp.status not in [201, 202]:
                     print(f"❌ Failed to create job: {resp.status} {await resp.text()}")
                     return
 
-                data = await resp.json()
-                job_id = data["job_id"]
+                job_info = await resp.json()
+                job_id = job_info["job_id"]
                 print(f"✅ Job created! ID: {job_id}")
-                print("-" * 50)
-
-        except ClientConnectorError:
-            print(f"❌ Could not connect to Orchestrator at {API_URL}.")
-            print("Is the orchestrator running?")
+        except Exception as e:
+            print(f"❌ Connection Error: {e}")
             return
 
-        # 2. Poll Status (Monitor Progress)
-        while True:
-            async with session.get(
-                f"{API_URL}/api/v1/jobs/{job_id}", headers=headers
+        print(
+            "\n[Monitoring] Waiting for updates. Press Ctrl+C to cancel the job manually."
+        )
+        seen_events = set()
+
+        try:
+            while True:
+                async with session.get(
+                    f"{API_URL}/api/v1/jobs/{job_id}", headers=headers
+                ) as resp:
+                    data = await resp.json()
+                    status = data["status"]
+
+                    # Show new Ghost/Worker events
+                    for event in data.get("events", []):
+                        event_key = f"{event['event_type']}_{event.get('timestamp')}"
+                        if event_key not in seen_events:
+                            ts = datetime.fromtimestamp(
+                                event.get("timestamp", 0)
+                            ).strftime("%H:%M:%S")
+                            print(
+                                f"\n  [{ts}] 🔔 EVENT: {event['event_type']} -> {event['payload']}"
+                            )
+                            seen_events.add(event_key)
+
+                    if status in ["finished", "failed", "quarantined", "cancelled"]:
+                        print(f"\n\n🏁 Final Status: {status.upper()}")
+                        if status == "finished":
+                            print(
+                                f"🎉 Result: {json.dumps(data.get('state_history', {}), indent=2)}"
+                            )
+                        elif status == "cancelled":
+                            print("🛑 Job was successfully cancelled.")
+                        else:
+                            print(f"⚠️ Error: {data.get('error_message')}")
+                        break
+
+                    # Progress Bar
+                    progress = data.get("progress", 0.0)
+                    bar_len = 20
+                    filled_len = int(bar_len * progress)
+                    bar = "█" * filled_len + "░" * (bar_len - filled_len)
+
+                    stdout.write(
+                        f"\rStatus: {status.ljust(12)} | [{bar}] {progress * 100:5.1f}%"
+                    )
+                    stdout.flush()
+
+                    await asyncio.sleep(0.5)
+        except KeyboardInterrupt:
+            print(f"\n\n🛑 User interruption. Attempting to CANCEL job {job_id}...")
+            async with session.post(
+                f"{API_URL}/api/v1/jobs/{job_id}/cancel", headers=headers
             ) as resp:
-                if resp.status != 200:
-                    print(f"\n❌ Error polling status: {resp.status}")
-                    break
+                if resp.status == 200:
+                    print("✅ Cancellation command sent to Orchestrator.")
+                else:
+                    print(f"❌ Failed to cancel: {resp.status} {await resp.text()}")
 
-                state = await resp.json()
-                status = state["status"]
-                progress = state.get("progress", 0.0)
-                msg = state.get("progress_message", "")
-
-                # Draw Progress Bar
-                bar_len = 30
-                filled_len = int(bar_len * progress)
-                bar = "█" * filled_len + "░" * (bar_len - filled_len)
-
-                # Clear line and print info
-                stdout.write(
-                    f"\r[{bar}] {progress * 100:5.1f}% | {status.upper()} | {msg[:40]:<40}"
-                )
-                stdout.flush()
-
-                if status in ["finished", "failed", "quarantined", "cancelled"]:
-                    print(f"\n{'-' * 50}")
-                    print(f"🏁 Final Status: {status}")
-                    if status == "finished":
-                        print(
-                            f"🎉 Result: {state.get('state_history', {}).get('analysis_summary')}"
-                        )
-                    else:
-                        print(f"⚠️ Error: {state.get('error_message')}")
-                    break
-
-            await sleep(0.5)
+            # Wait a bit to show the final status
+            await asyncio.sleep(2)
 
 
 if __name__ == "__main__":
     try:
-        run(main())
+        asyncio.run(main())
     except KeyboardInterrupt:
         print("\n👋 Client stopped.")

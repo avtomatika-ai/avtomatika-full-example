@@ -1,83 +1,127 @@
 import asyncio
 import os
 import sys
-import pytest
-import aiohttp
+import time
 
-# Add parent dir to path to import full_example if needed
+import aiohttp
+import pytest
+
+# Add parent dir to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Configuration for test
+# Configuration
 API_URL = os.environ.get("API_URL", "http://localhost:8080")
-CLIENT_TOKEN = "user_token_vip"
+CLIENT_TOKEN = os.environ.get("CLIENT_TOKEN", "user_token_vip")
 
 
 @pytest.mark.asyncio
-async def test_full_flow_execution():
+async def test_integration_full_flow():
     """
-    End-to-End test:
-    1. Checks if Orchestrator is healthy.
-    2. Creates a job.
-    3. Polls until completion.
-    4. Asserts success.
+    Modular E2E Integration Test:
+    1. Worker Registration Verification
+    2. Job Submission (via Blueprint API)
+    3. State Machine Transitions (Human -> Parallel -> Sub-blueprint)
+    4. Result Aggregation
     """
     async with aiohttp.ClientSession() as session:
-        # 1. Health Check
-        async with session.get(f"{API_URL}/_public/status") as resp:
-            if resp.status != 200:
-                pytest.skip(
-                    "Orchestrator is not running. Start it with 'docker-compose up' to run this test."
-                )
-
-        # 2. Create Job
         headers = {"X-Client-Token": CLIENT_TOKEN}
+
+        # 1. VERIFY WORKERS
+        workers = []
+        for _ in range(60):
+            async with session.get(
+                f"{API_URL}/api/v1/workers", headers=headers
+            ) as resp:
+                assert resp.status == 200
+                all_workers = await resp.json()
+                now = int(time.time())
+                workers = [
+                    w
+                    for w in all_workers
+                    if w.get("status") == "idle" and w.get("timestamp", 0) >= now - 20
+                ]
+                if len(workers) >= 3:
+                    break
+            await asyncio.sleep(1)
+        assert len(workers) >= 3, (
+            f"Expected at least 3 active workers, found {len(workers)}"
+        )
+
+        # 2. SUBMIT JOB
         payload = {
             "initial_data": {
-                "path": "test_video.mp4",
+                "path": "/videos/movie.mp4",
                 "quality": "high",
-                "use_advanced_dispatch": True,
+                "use_hot_cache": True,
             }
         }
 
+        # Blueprint endpoints are registered with /api/ prefix
+        # for explicit endpoints.
         async with session.post(
-            f"{API_URL}/api/v1/jobs/full_showcase", json=payload, headers=headers
+            f"{API_URL}/api/submit/full_showcase", json=payload, headers=headers
         ) as resp:
-            assert resp.status == 202, f"Failed to create job: {await resp.text()}"
-            data = await resp.json()
-            job_id = data["job_id"]
-            print(f"Test Job ID: {job_id}")
+            assert resp.status in [201, 202], (
+                f"Failed to submit job: {resp.status} {await resp.text()}"
+            )
+            job_id = (await resp.json())["job_id"]
+        print(f"Test Job ID: {job_id}")
 
-        # 3. Poll for result (max 30 seconds)
-        status = "unknown"
-        state = {}
-        for i in range(60):
-            await asyncio.sleep(0.5)
+        # 3. POLL FOR STATUS & HUMAN APPROVAL
+        status = "pending"
+        for _ in range(30):
             async with session.get(
                 f"{API_URL}/api/v1/jobs/{job_id}", headers=headers
             ) as resp:
                 assert resp.status == 200
-                state = await resp.json()
-                status = state["status"]
-                current_state = state.get("current_state")
-                if i % 10 == 0:
+                data = await resp.json()
+                status = data.get("status")
+                print(f"Polling Job {job_id}: status={status}")
+
+                if status == "waiting_for_human":
                     print(
-                        f"Polling Job {job_id}: status={status}, state={current_state}"
+                        f"✅ Job {job_id} is waiting for human approval. Sending 'approved' decision..."
                     )
+                    async with session.post(
+                        f"{API_URL}/_public/webhooks/approval/{job_id}",
+                        json={"decision": "approved"},
+                        headers=headers,
+                    ) as decide_resp:
+                        assert decide_resp.status == 200
+                        print("🚀 Approval sent!")
 
-                if status in ["finished", "failed", "quarantined", "cancelled"]:
-                    print(f"Job {job_id} reached terminal status: {status}")
+                if status in ["finished", "failed", "quarantined"]:
                     break
-        else:
-            print(f"Final state before timeout: {state}")
-            pytest.fail(
-                f"Job timed out (did not finish in 30s). Last status: {status}, state: {state.get('current_state')}"
-            )
+            await asyncio.sleep(2)
 
-        # 4. Assertions
-        assert status == "finished", (
-            f"Job failed with error: {state.get('error_message')}"
+        assert status == "finished", f"Job failed with status: {status}"
+
+        # 4. VERIFY FINAL STATE & AGGREGATION
+        async with session.get(
+            f"{API_URL}/api/v1/jobs/{job_id}", headers=headers
+        ) as resp:
+            state = await resp.json()
+
+        context = state.get("context", {})
+        # If context is empty, try state itself (some API versions flatten it)
+        if not context:
+            context = state
+
+        # Check for either the custom summary or raw aggregation results
+        has_aggregation = (
+            "analysis_summary" in context or "aggregation_results" in context
         )
-        assert "analysis_summary" in state.get("state_history", {}), (
-            f"Missing summary in history: {state.get('state_history')}"
+        assert has_aggregation, (
+            f"Fan-in aggregation failed. Context keys: {list(context.keys())}"
         )
-        print("Test passed successfully!")
+
+        # Verify sub-blueprint interaction
+        has_subjob = (
+            any("sub_job_" in key and "_result" in key for key in context.keys())
+            or "child_job_id" in state
+        )
+        assert has_subjob, (
+            f"Sub-blueprint check failed. State keys: {list(state.keys())}"
+        )
+
+        print("✅ Modular E2E Integration Test PASSED!")

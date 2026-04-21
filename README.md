@@ -1,8 +1,8 @@
 # Avtomatika: Full Feature Showcase
 
-EN | [RU](./README_RU.md)
+EN | [ES](./README_ES.md) | [RU](./README_RU.md)
 
-This project provides a comprehensive demonstration of the **Avtomatika HLN (Hierarchical Logic Network)** ecosystem. it covers all key architectural patterns: from simple tasks to nested workflows, parallel execution, and automated scheduling.
+This project provides a comprehensive demonstration of the **Avtomatika HLN (Hierarchical Logic Network)** ecosystem. It serves as the "Gold Standard" for E2E testing, covering all architectural patterns and advanced worker capabilities.
 
 ## 🏗 System Architecture
 
@@ -10,81 +10,65 @@ The example deploys a full-featured distributed environment:
 
 ![Main Blueprint](docs/images/full_showcase_graph.png)
 
-1.  **Orchestrator**: The central engine managing the `full_showcase` blueprint.
-2.  **GPU Worker**: A high-performance worker for "heavy" tasks (transcoding).
-3.  **CPU Workers**: Two workers for file analysis (one reliable, one intentionally glitchy for reputation testing).
+1.  **Orchestrator**: The central engine managing complex blueprints with nested sub-jobs. Powered by `avtomatika` PyPI package.
+2.  **GPU Worker**: Demonstrates heavy tasks with **Progress Reporting**, **Hot Cache**, and **S3 File Uploads**. Powered by `avtomatika-worker` PyPI package.
+3.  **CPU Workers**: Two executors for parallel analysis (one reliable, one glitchy for reputation testing).
+4.  **Webhook Receiver**: External service receiving real-time job notifications.
+5.  **Infrastructure**: Redis (state), PostgreSQL (history), MinIO (S3), VictoriaMetrics, Grafana, and Jaeger.
 
-### 🪆 Sub-process logic
-The `metadata_enrichment` sub-blueprint:
-![Sub Blueprint](docs/images/metadata_enrichment_graph.png)
+## 🌟 Advanced Features Showcase
 
-4.  **Scheduler**: Native scheduler that triggers maintenance tasks periodically.
-5.  **Webhook Receiver**: External service demonstrating real-time job status notifications.
-6.  **Infrastructure**: 
-    *   **Redis**: Real-time state storage and task queues.
-    *   **PostgreSQL**: Long-term history and audit trails.
-    *   **MinIO (S3)**: Heavy payload offloading.
-    *   **VictoriaMetrics & Grafana**: High-performance monitoring stack.
-    *   **Jaeger**: Distributed tracing (OpenTelemetry).
+This example demonstrates 100% of the core **Avtomatika HLN** functionality:
 
-## 🌟 Key Features in this Example
+### 1. Robust Dispatching (ZSET Indexing)
+All worker discovery is powered by Redis **Sorted Sets (ZSET)**. Expiration timestamps are used as scores, allowing the orchestrator to filter out stale workers atomically during discovery. This eliminates "data missing" race conditions.
 
-### 1. Native Scheduler ⏰
-The Orchestrator automatically loads configuration from `schedules.toml`. The example includes a `maintenance_task` that runs every minute to execute a cleanup blueprint.
+### 2. Reliable Work Stealing
+Idle workers can "steal" tasks from busy workers' queues to ensure maximum utilization. The system guarantees atomic updates of `assigned_worker_id`, preventing result mismatch errors.
 
-### 2. Nested Workflows (Sub-Blueprints) 🪆
-The `full_showcase` process triggers a child blueprint `metadata_enrichment`. This demonstrates how to break down complex business logic into isolated, reusable blocks.
+### 3. Human-in-the-Loop
+Integration of `actions.await_human_approval()`. The pipeline pauses at the start, moving to `waiting_for_human` status until an external `APPROVED` decision is received via the Public API.
 
-### 3. Parallelism (Fan-Out/Fan-In) 🚀
-Demonstrates simultaneous execution of multiple file analysis tasks. The Orchestrator waits for all parallel branches to complete and aggregates their results into a single context.
+### 4. Smart & Cost-Aware Dispatching
+*   **Resource Constraints**: Tasks requiring specific CPU/RAM (using GE - Greater or Equal logic).
+*   **Hot Cache Matching**: Using `resource_hint` to target workers that already have specific assets pre-loaded.
+*   **Timeouts**: Fine-grained `dispatch_timeout` and `result_timeout` control.
 
-### 4. Smart Dispatching 🧠
-Shows various worker selection strategies:
-*   `default`: Balancing based on skill hot-cache.
-*   `best_value`: Selecting workers based on price/reputation ratio.
-*   `round_robin`: Sequential task distribution.
+### 5. Zero-Trust Security (v1.0b8)
+*   Centralized signature verification in the `rxon` protocol package.
+*   Strict **Integer Timestamps** for deterministic cryptographic hashing.
+*   Replay protection and Identity Chain verification.
 
-### 5. Webhook Integration 📡
-The `client.py` registers a `webhook_url` during job creation. The Orchestrator sends a POST request to the `webhook_receiver` immediately upon job completion or failure.
+### 5. Modern Blueprint Syntax
+*   **Conditional Routing**: Use of `.when("condition")` decorators for declarative branching.
+*   **Inferred Names**: State names automatically derived from function names.
+*   **Parallelism**: Easy `fan-out / fan-in` via `actions.dispatch_parallel()`.
 
-## 🚀 Quick Start (Docker)
+## 🚀 Quick Start
 
-The fastest way to see everything in action is using Docker Compose.
+### 1. Launch with Docker (Full Stack)
+```bash
+docker compose up -d --build
+```
 
-1.  **Launch the Stack**:
-    ```bash
-    cd projects/avtomatika_full_example
-    docker compose up -d --build
-    ```
+### 2. Run Automated Full Validation
+Performs a deep audit (linting, graphs, scenario execution with human approval emulation, S3 verification, and metrics):
+```bash
+make full-check
+```
 
-2.  **Run the Test Client**:
-    The script will create a job and display an interactive progress bar:
-    ```bash
-    # Virtual environment is recommended
-    python3 -m venv .venv
-    source .venv/bin/activate
-    pip install aiohttp
-    python3 client.py
-    ```
-
-## 📊 Monitoring & Tools
-
-Once running, the following interfaces are available:
-*   **Grafana**: [http://localhost:3000](http://localhost:3000) (Pre-configured "Avtomatika Overview" dashboard).
-*   **Jaeger (Traces)**: [http://localhost:16686](http://localhost:16686).
-*   **API Docs (Swagger)**: [http://localhost:8080/_public/docs](http://localhost:8080/_public/docs).
-*   **Metrics (Prometheus)**: [http://localhost:8080/_public/metrics](http://localhost:8080/_public/metrics).
+### 3. Interactive Demo Client
+```bash
+make init
+.venv/bin/python3 client.py
+```
 
 ## 📂 File Structure
 
-*   `full_example.py`: Orchestrator entry point.
-*   `config.py`: Configuration loading logic.
-*   `blueprints/`: Package containing business logic definitions (blueprints).
-*   `workers/`: Directory with example workers (GPU, Reliable CPU, Unreliable CPU).
-*   `webhook_receiver.py`: Webhook notification server.
-*   `schedules.toml`: Periodic task configuration.
-*   `example_clients.toml`: API key and access control settings.
-*   `ops/`: Monitoring configurations (VictoriaMetrics, Grafana).
+*   `blueprints/main.py`: Complex flow with Human-approval, Parallelism, and S3.
+*   `blueprints/sub.py`: Modern syntax with `.when()` conditions.
+*   `workers/gpu.py`: Advanced worker with Progress, Events, and Hot Cache.
+*   `workers/cpu_*.py`: Simple workers for analysis and reputation testing.
 
 ---
-*Maintained by Dmitrii Gagarin aka madgagarin.*
+*Developed by Dmitrii Gagarin aka madgagarin.*

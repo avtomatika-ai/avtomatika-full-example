@@ -1,11 +1,8 @@
-# This file defines individual authentication tokens for workers.
-# This is more secure than using a single global worker token.
-
-[gpu-worker-01]
+["gpu-worker-01"]
 token = "super-secret-gpu-worker-token"
 
-[cpu-worker-01]
+["cpu-worker-01"]
 token = "super-secret-cpu-worker-token"
 
-[cpu-worker-02]
+["cpu-worker-02"]
 token = "super-secret-cpu-worker-token-2"

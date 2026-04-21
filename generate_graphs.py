@@ -1,11 +1,12 @@
-from blueprints import main_bp, sub_blueprint
+from blueprints import main_bp, metadata_enrichment_bp, maintenance_bp
 import os
 
 
 def generate():
     print("🎨 Generating blueprint graphs...")
     main_bp.render_graph("full_showcase_graph")
-    sub_blueprint.render_graph("metadata_enrichment_graph")
+    metadata_enrichment_bp.render_graph("metadata_enrichment_graph")
+    maintenance_bp.render_graph("periodic_maintenance_graph")
     print(f"✅ Done. Check {os.getcwd()} for .png files.")
 
 

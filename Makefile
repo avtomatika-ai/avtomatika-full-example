@@ -1,4 +1,18 @@
-.PHONY: up down restart ps logs clean client health test
+VENV = .venv
+BIN = $(VENV)/bin
+PYTHON = $(BIN)/python3
+PIP = $(BIN)/pip
+PYTEST = $(BIN)/pytest
+RUFF = $(BIN)/ruff
+
+.PHONY: init up down restart ps logs clean client health test graph lint
+
+# Initialize the local environment (for running client/workers locally)
+init:
+	python3 -m venv $(VENV)
+	$(PIP) install --upgrade pip
+	$(PIP) install .[test]
+	@echo "✅ Local environment ready. Use 'source $(VENV)/bin/activate' to use it."
 
 # Start the entire stack in the background
 up:
@@ -28,17 +42,17 @@ clean:
 
 # Run the test client
 client:
-	python3 client.py
+	$(PYTHON) client.py
 
 # Run workers locally (requires environment variables set)
 worker-gpu:
-	python3 workers/gpu.py
+	$(PYTHON) workers/gpu.py
 
 worker-cpu-reliable:
-	python3 workers/cpu_reliable.py
+	$(PYTHON) workers/cpu_reliable.py
 
 worker-cpu-unreliable:
-	python3 workers/cpu_unreliable.py
+	$(PYTHON) workers/cpu_unreliable.py
 
 # Check system readiness
 health:
@@ -50,13 +64,22 @@ health:
 
 # Generate visual graphs of the blueprints (requires graphviz)
 graph:
-	python3 generate_graphs.py
+	$(PYTHON) generate_graphs.py
 
 # Run linter (ruff)
 lint:
-	ruff check .
-	ruff format --check .
+	$(RUFF) check .
+	$(RUFF) format --check .
 
 # Run integration tests
 test:
-	pytest -s tests/
+	$(PYTEST) -s tests/
+
+# --- Full System Validation ---
+full-check: lint graph
+	@echo "🔍 Checking Docker Containers Health..."
+	docker compose ps
+	@echo "🚀 Running Comprehensive Integration Suite..."
+	$(PYTEST) -s tests/test_comprehensive.py
+	@echo "✅ ALL SYSTEMS VERIFIED"
+

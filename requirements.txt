@@ -1,6 +1,0 @@
-# Dependencies for the standalone example
-# These will be pulled from PyPI (or your private registry)
-avtomatika[all]==1.0b11
-avtomatika-worker==1.0b5
-aiohttp>=3.12
-orjson>=3.11
