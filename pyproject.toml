@@ -4,14 +4,16 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "avtomatika-full-example"
-version = "1.0b22+w1.0b14.0"
-description = "Comprehensive example for Avtomatika HLNOrchestrator"
+version = "1.0b26"
+description = "Comprehensive example for Avtomatika HLN Orchestrator"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
 dependencies = [
-    "avtomatika[all]==1.0b22",
-    "avtomatika-worker[pydantic]==1.0b14",
+    "avtomatika[all]>=1.0b26",
+    "avtomatika-worker[pydantic]>=1.0b17",
+    "rxon>=1.0b13",
+    "cryptography>=42.0.0",
 ]
 
 [project.optional-dependencies]

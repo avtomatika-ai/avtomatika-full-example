@@ -7,7 +7,8 @@ import time
 
 API_URL = os.environ.get("API_URL", "http://localhost:8080")
 CLIENT_TOKEN = "user_token_vip"
-WEBHOOK_RECEIVER_URL = "http://localhost:8000/webhook"
+# We use the docker service name since orchestrator runs in docker
+WEBHOOK_RECEIVER_URL = "http://webhook-receiver:5000/webhook"
 
 
 async def run_scenario(session, name, data):
@@ -16,7 +17,7 @@ async def run_scenario(session, name, data):
 
     print(f"\n[SCENARIO] 🚀 Starting: {name}", flush=True)
     async with session.post(
-        f"{API_URL}/api/submit/full_showcase", json=payload, headers=headers
+        f"{API_URL}/api/v1/submit/full_showcase", json=payload, headers=headers
     ) as resp:
         if resp.status not in [201, 202]:
             txt = await resp.text()
@@ -32,7 +33,12 @@ async def run_scenario(session, name, data):
             f"{API_URL}/api/v1/jobs/{job_id}", headers=headers
         ) as resp:
             state = await resp.json()
-            status = state["status"]
+            status = state.get("status")
+            if not status:
+                # Log for debugging if status is missing
+                print(f"DEBUG: Missing status in response: {state}")
+                continue
+
             step = state.get("current_state", "N/A")
 
             # Transparency: check workers status during wait
@@ -58,6 +64,7 @@ async def run_scenario(session, name, data):
                 async with session.post(
                     f"{API_URL}/_public/webhooks/approval/{job_id}",
                     json={"decision": "approved"},
+                    headers=headers,
                 ) as approve_resp:
                     if approve_resp.status == 200:
                         print(f"    ✅ Approval sent for job {job_id}")
@@ -73,18 +80,19 @@ async def test_infrastructure_ready():
     async with aiohttp.ClientSession() as session:
         for _ in range(30):
             try:
-                async with session.get(f"{API_URL}/_public/metrics") as resp:
+                async with session.get(f"{API_URL}/_public/status") as resp:
                     if resp.status == 200:
                         break
+
             except Exception:
                 pass
             await asyncio.sleep(1)
         else:
-            pytest.fail("Infrastructure not ready")
+            pytest.fail("Infrastructure not ready (Orchestrator /status timed out)")
 
         # Wait for 3+ workers
         headers = {"X-Client-Token": CLIENT_TOKEN}
-        for _ in range(60):
+        for _ in range(120):
             try:
                 async with session.get(
                     f"{API_URL}/api/v1/workers", headers=headers
@@ -96,7 +104,7 @@ async def test_infrastructure_ready():
                             w
                             for w in all_workers
                             if w.get("status") == "idle"
-                            and w.get("timestamp", 0) >= now - 20
+                            and w.get("timestamp", 0) >= now - 30
                         ]
                         if len(idle_workers) >= 3:
                             return

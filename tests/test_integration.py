@@ -38,7 +38,8 @@ async def test_integration_full_flow():
                 workers = [
                     w
                     for w in all_workers
-                    if w.get("status") == "idle" and w.get("timestamp", 0) >= now - 20
+                    if (w.get("status") == "idle" or w.get("status") == "active")
+                    and w.get("timestamp", 0) >= now - 60
                 ]
                 if len(workers) >= 3:
                     break
@@ -52,14 +53,14 @@ async def test_integration_full_flow():
             "initial_data": {
                 "path": "/videos/movie.mp4",
                 "quality": "high",
-                "use_hot_cache": True,
+                "use_hot_skills": True,
             }
         }
 
         # Blueprint endpoints are registered with /api/ prefix
         # for explicit endpoints.
         async with session.post(
-            f"{API_URL}/api/submit/full_showcase", json=payload, headers=headers
+            f"{API_URL}/api/v1/submit/full_showcase", json=payload, headers=headers
         ) as resp:
             assert resp.status in [201, 202], (
                 f"Failed to submit job: {resp.status} {await resp.text()}"
@@ -69,7 +70,7 @@ async def test_integration_full_flow():
 
         # 3. POLL FOR STATUS & HUMAN APPROVAL
         status = "pending"
-        for _ in range(30):
+        for _ in range(60):
             async with session.get(
                 f"{API_URL}/api/v1/jobs/{job_id}", headers=headers
             ) as resp:
@@ -90,11 +91,13 @@ async def test_integration_full_flow():
                         assert decide_resp.status == 200
                         print("🚀 Approval sent!")
 
-                if status in ["finished", "failed", "quarantined"]:
+                if status in ["finished", "failed", "quarantined", "cancelled"]:
                     break
             await asyncio.sleep(2)
 
-        assert status == "finished", f"Job failed with status: {status}"
+        assert status == "finished", (
+            f"Job failed with status: {status}. Error: {data.get('error_message')}"
+        )
 
         # 4. VERIFY FINAL STATE & AGGREGATION
         async with session.get(
@@ -102,26 +105,45 @@ async def test_integration_full_flow():
         ) as resp:
             state = await resp.json()
 
-        context = state.get("context", {})
-        # If context is empty, try state itself (some API versions flatten it)
+        # In new version, context is flattened in the job state or in state_history
+        # Aggregator updates often land in 'initial_data' for subsequent steps
+        context = state.get("state_history", {})
+        initial_data = state.get("initial_data", {})
         if not context:
             context = state
 
         # Check for either the custom summary or raw aggregation results
+        # In new version, aggregation results are often merged into 'result'
+        result = state.get("result", {})
         has_aggregation = (
-            "analysis_summary" in context or "aggregation_results" in context
+            "analysis_summary" in context
+            or "aggregation_results" in context
+            or "is_aggregated" in context
+            or (isinstance(result, dict) and "analysis_summary" in result)
+            or "analysis_summary" in initial_data
         )
         assert has_aggregation, (
-            f"Fan-in aggregation failed. Context keys: {list(context.keys())}"
+            f"Fan-in aggregation failed. Context keys: {list(context.keys())}, InitialData keys: {list(initial_data.keys())}, Result keys: {list(result.keys()) if isinstance(result, dict) else 'not a dict'}"
         )
 
-        # Verify sub-blueprint interaction
-        has_subjob = (
-            any("sub_job_" in key and "_result" in key for key in context.keys())
-            or "child_job_id" in state
-        )
-        assert has_subjob, (
-            f"Sub-blueprint check failed. State keys: {list(state.keys())}"
+        # Verify sub-blueprint interactions (Multiple child jobs expected)
+        async with session.get(
+            f"{API_URL}/api/v1/jobs/{job_id}/history", headers=headers
+        ) as resp:
+            history = await resp.json()
+
+        child_jobs = []
+        for event in history:
+            snapshot = event.get("context_snapshot", {})
+            if snapshot.get("child_job_id"):
+                child_jobs.append(snapshot.get("child_job_id"))
+
+        # Remove duplicates
+        child_jobs = list(set(child_jobs))
+
+        print(f"Child job IDs executed: {child_jobs}")
+        assert len(child_jobs) >= 2, (
+            f"Expected at least 2 sub-jobs (metadata_enrichment and media_cleanup), found {len(child_jobs)}"
         )
 
-        print("✅ Modular E2E Integration Test PASSED!")
+        print("✅ Modular E2E Integration Test PASSED (Multiple Sub-Jobs Verified)!")

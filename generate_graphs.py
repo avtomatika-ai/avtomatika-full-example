@@ -1,4 +1,4 @@
-from blueprints import main_bp, metadata_enrichment_bp, maintenance_bp
+from blueprints import main_bp, metadata_enrichment_bp, maintenance_bp, media_cleanup_bp
 import os
 
 
@@ -7,6 +7,7 @@ def generate():
     main_bp.render_graph("full_showcase_graph")
     metadata_enrichment_bp.render_graph("metadata_enrichment_graph")
     maintenance_bp.render_graph("periodic_maintenance_graph")
+    media_cleanup_bp.render_graph("media_cleanup_graph")
     print(f"✅ Done. Check {os.getcwd()} for .png files.")
 
 

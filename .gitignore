@@ -46,3 +46,5 @@ avtomatika_history.db
 *.png
 
 !docs/images/*.png
+*.egg-info/
+logs.txt

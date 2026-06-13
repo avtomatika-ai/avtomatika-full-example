@@ -62,7 +62,7 @@ async def test_features_integration():
             "initial_data": {"path": "/test/video.mp4"},
         }
         async with session.post(
-            f"{API_URL}/api/submit/full_showcase", json=payload, headers=headers
+            f"{API_URL}/api/v1/submit/full_showcase", json=payload, headers=headers
         ) as resp:
             assert resp.status in [201, 202]
             job_id = (await resp.json())["job_id"]
@@ -87,39 +87,47 @@ async def test_features_integration():
 
         # 3. Poll and check history for origin_task_id
         found_origin = False
+        # Wait for the job to complete
+        found_origin = False
         for _ in range(30):
             async with session.get(
                 f"{API_URL}/api/v1/jobs/{job_id}", headers=headers
             ) as resp:
-                assert resp.status == 200
-                data = await resp.json()
-                history = data.get("history", [])
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data.get("status") in ["finished", "failed", "quarantined"]:
+                        break
+            await asyncio.sleep(1)
 
+        # Now fetch history and check for origin_task_id
+        async with session.get(
+            f"{API_URL}/api/v1/jobs/{job_id}/history", headers=headers
+        ) as resp:
+            if resp.status == 200:
+                history = await resp.json()
                 for event in history:
+                    print(
+                        f"DEBUG Event type: {event.get('event_type')}, keys: {list(event.keys())}"
+                    )
+                    if event.get("event_type") == "task_finished":
+                        print(f"DEBUG Task finished event full: {event}")
                     # Trace propagation check
-                    if event.get("origin_task_id") == job_id:
+                    if event.get("event_type") == "task_finished" and event.get(
+                        "origin_task_id"
+                    ):
                         found_origin = True
                         print(
-                            f"✅ FOUND TRACE: Task finished with origin_task_id: {job_id}"
+                            f"✅ FOUND TRACE: Task finished with origin_task_id: {event['origin_task_id']}"
                         )
                         break
 
-                if found_origin or data.get("status") in ["finished", "failed"]:
-                    break
-            await asyncio.sleep(1)
-
-        if not found_origin:
-            async with session.get(
-                f"{API_URL}/api/v1/jobs/{job_id}", headers=headers
-            ) as resp:
-                data = await resp.json()
-                history = data.get("history", [])
                 if not found_origin:
                     print(
-                        f"⚠️ origin_task_id not found in history of job {job_id} yet. History length: {len(history)}"
+                        f"⚠️ origin_task_id not found in history of job {job_id}. History length: {len(history)}"
                     )
+                    assert False, "origin_task_id was not propagated in history!"
 
-    print("\n✅ Features Integration Test Finished (Partial Verification)")
+    print("\n✅ Features Integration Test Finished (Full Verification)")
 
 
 if __name__ == "__main__":

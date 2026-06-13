@@ -11,7 +11,7 @@ The example deploys a full-featured distributed environment:
 ![Main Blueprint](docs/images/full_showcase_graph.png)
 
 1.  **Orchestrator**: The central engine managing complex blueprints with nested sub-jobs. Powered by `avtomatika` PyPI package.
-2.  **GPU Worker**: Demonstrates heavy tasks with **Progress Reporting**, **Hot Cache**, and **S3 File Uploads**. Powered by `avtomatika-worker` PyPI package.
+2.  **GPU Worker**: Demonstrates heavy tasks with **Progress Reporting**, **Artifact Targeting**, and **S3 File Uploads**. Powered by `avtomatika-worker` PyPI package.
 3.  **CPU Workers**: Two executors for parallel analysis (one reliable, one glitchy for reputation testing).
 4.  **Webhook Receiver**: External service receiving real-time job notifications.
 5.  **Infrastructure**: Redis (state), PostgreSQL (history), MinIO (S3), VictoriaMetrics, Grafana, and Jaeger.
@@ -27,22 +27,23 @@ All worker discovery is powered by Redis **Sorted Sets (ZSET)**. Expiration time
 Idle workers can "steal" tasks from busy workers' queues to ensure maximum utilization. The system guarantees atomic updates of `assigned_worker_id`, preventing result mismatch errors.
 
 ### 3. Human-in-the-Loop
-Integration of `actions.await_human_approval()`. The pipeline pauses at the start, moving to `waiting_for_human` status until an external `APPROVED` decision is received via the Public API.
+Integration of `actions.await_human_approval()`. The pipeline pauses at the start, moving to `waiting_for_human` status until an external `APPROVED` decision is received via the Public API v1.
 
 ### 4. Smart & Cost-Aware Dispatching
 *   **Resource Constraints**: Tasks requiring specific CPU/RAM (using GE - Greater or Equal logic).
-*   **Hot Cache Matching**: Using `resource_hint` to target workers that already have specific assets pre-loaded.
+*   **Artifact Targeting**: Using `installed_artifacts` to target workers that already have specific components (e.g. AI models or presets) installed.
 *   **Timeouts**: Fine-grained `dispatch_timeout` and `result_timeout` control.
 
-### 5. Zero-Trust Security (v1.0b8)
-*   Centralized signature verification in the `rxon` protocol package.
-*   Strict **Integer Timestamps** for deterministic cryptographic hashing.
-*   Replay protection and Identity Chain verification.
+### 5. Zero-Trust Security (v1.0b26)
+*   **mTLS & STS**: Support for mutual TLS authentication and automatic token rotation via Security Token Service.
+*   **Cryptographic Signatures**: Every message is signed using HMAC-SHA256.
+*   **Identity Chain**: Verification of the full identity chain to prevent event spoofing.
+*   **Replay Protection**: Mandatory timestamps for all protocol messages.
 
-### 5. Modern Blueprint Syntax
+### 6. Modern Blueprint Syntax
 *   **Conditional Routing**: Use of `.when("condition")` decorators for declarative branching.
 *   **Inferred Names**: State names automatically derived from function names.
-*   **Parallelism**: Easy `fan-out / fan-in` via `actions.dispatch_parallel()`.
+*   **Parallelism**: Easy `fan-out / fan-in` via `actions.dispatch_parallel()` with individual transition support.
 
 ## 🚀 Quick Start
 
@@ -67,7 +68,8 @@ make init
 
 *   `blueprints/main.py`: Complex flow with Human-approval, Parallelism, and S3.
 *   `blueprints/sub.py`: Modern syntax with `.when()` conditions.
-*   `workers/gpu.py`: Advanced worker with Progress, Events, and Hot Cache.
+*   `blueprints/media/processor.py`: Example of a modular sub-blueprint for media cleanup. ![Cleanup Graph](docs/images/media_cleanup_graph.png)
+*   `workers/gpu.py`: Advanced worker with Progress, Events, and Artifact Targeting.
 *   `workers/cpu_*.py`: Simple workers for analysis and reputation testing.
 
 ---

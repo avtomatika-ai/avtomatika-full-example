@@ -2,11 +2,13 @@ services:
   # --- Infrastructure ---
   redis:
     image: redis:7-alpine
-    network_mode: host
+    ports:
+      - "6379:6379"
 
   postgres:
     image: postgres:15-alpine
-    network_mode: host
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_USER: user
       POSTGRES_PASSWORD: password
@@ -14,7 +16,9 @@ services:
 
   minio:
     image: minio/minio
-    network_mode: host
+    ports:
+      - "9000:9000"
+      - "9001:9001"
     environment:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
@@ -22,12 +26,11 @@ services:
 
   minio-init:
     image: minio/mc
-    network_mode: host
     depends_on:
       - minio
     entrypoint: >
       /bin/sh -c "
-      until (/usr/bin/mc alias set myminio http://localhost:9000 minioadmin minioadmin) do echo '...waiting...' && sleep 1; done;
+      until (/usr/bin/mc alias set myminio http://minio:9000 minioadmin minioadmin) do echo '...waiting...' && sleep 1; done;
       /usr/bin/mc mb myminio/avtomatika-payloads || true;
       /usr/bin/mc policy set public myminio/avtomatika-payloads;
       exit 0;
@@ -35,20 +38,22 @@ services:
 
   jaeger:
     image: jaegertracing/all-in-one:latest
-    network_mode: host
+    ports:
+      - "16686:16686"
+      - "4317:4317"
+      - "4318:4318"
 
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.93.0
-    network_mode: host
-    volumes:
-      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "8428:8428"
     command:
-      - "-promscrape.config=/etc/prometheus/prometheus.yml"
-      - "-promscrape.configCheckInterval=10s"
+      - "-opentelemetryListenAddr=:8428"
 
   grafana:
     image: grafana/grafana:10.0.0
-    network_mode: host
+    ports:
+      - "3001:3000"
     volumes:
       - ./ops/grafana/datasources:/etc/grafana/provisioning/datasources
       - ./ops/grafana/dashboards:/etc/grafana/provisioning/dashboards
@@ -59,7 +64,8 @@ services:
   webhook-receiver:
     image: avtomatika-base
     build: .
-    network_mode: host
+    ports:
+      - "5000:5000"
     command: ["python", "webhook_receiver.py"]
     environment:
       - LOG_LEVEL=DEBUG
@@ -69,17 +75,25 @@ services:
   orchestrator:
     image: avtomatika-base
     build: .
-    network_mode: host
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/_public/status"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     environment:
-      - REDIS_HOST=localhost
-      - HISTORY_DATABASE_URI=postgresql://user:password@localhost:5432/avtomatika
-      - S3_ENDPOINT_URL=http://localhost:9000
+      - REDIS_HOST=redis
+      - HISTORY_DATABASE_URI=postgresql://user:password@postgres:5432/avtomatika
+      - S3_ENDPOINT_URL=http://minio:9000
       - S3_ACCESS_KEY=minioadmin
       - S3_SECRET_KEY=minioadmin
       - S3_DEFAULT_BUCKET=avtomatika-payloads
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - OTEL_SERVICE_NAME=avtomatika-orchestrator
       - LOG_LEVEL=DEBUG
+      - DETAILED_API_RESPONSES=True
       - SCHEDULES_CONFIG_PATH=/app/schedules.toml
       - CLIENTS_CONFIG_PATH=/app/example_clients.toml
       - WORKERS_CONFIG_PATH=/app/example_workers.toml
@@ -89,61 +103,64 @@ services:
       - ./example_clients.toml:/app/example_clients.toml
       - ./example_workers.toml:/app/example_workers.toml
       - ./blueprints:/app/blueprints
+      - ./packages:/app/packages
 
-  # --- Avtomatika Workers ---
   worker-gpu:
     image: avtomatika-base
     build: .
-    network_mode: host
+    depends_on:
+      orchestrator:
+        condition: service_healthy
     command: ["python", "workers/gpu.py"]
     environment:
       - WORKER_ID=gpu-worker-01
       - WORKER_TOKEN=super-secret-gpu-worker-token
-      - ORCHESTRATOR_URL=http://localhost:8080
+      - ORCHESTRATOR_URL=http://orchestrator:8080
       - CPU_CORES=8
       - RAM_GB=16
-      - S3_ENDPOINT_URL=http://localhost:9000
+      - S3_ENDPOINT_URL=http://minio:9000
       - S3_ACCESS_KEY=minioadmin
       - S3_SECRET_KEY=minioadmin
       - S3_DEFAULT_BUCKET=avtomatika-payloads
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - OTEL_SERVICE_NAME=gpu-worker
       - HOSTNAME=worker-gpu-node
+
 
   worker-cpu-1:
     image: avtomatika-base
     build: .
-    network_mode: host
     command: ["python", "workers/cpu_unreliable.py"]
     environment:
       - WORKER_ID=cpu-worker-01
       - WORKER_TOKEN=super-secret-cpu-worker-token
-      - ORCHESTRATOR_URL=http://localhost:8080
+      - ORCHESTRATOR_URL=http://orchestrator:8080
       - CPU_CORES=4
       - RAM_GB=8
-      - S3_ENDPOINT_URL=http://localhost:9000
+      - S3_ENDPOINT_URL=http://minio:9000
       - S3_ACCESS_KEY=minioadmin
       - S3_SECRET_KEY=minioadmin
       - S3_DEFAULT_BUCKET=avtomatika-payloads
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - OTEL_SERVICE_NAME=cpu-worker-unreliable
       - HOSTNAME=worker-cpu-1-node
+
 
   worker-cpu-2:
     image: avtomatika-base
     build: .
-    network_mode: host
     command: ["python", "workers/cpu_reliable.py"]
     environment:
       - WORKER_ID=cpu-worker-02
       - WORKER_TOKEN=super-secret-cpu-worker-token-2
-      - ORCHESTRATOR_URL=http://localhost:8080
+      - ORCHESTRATOR_URL=http://orchestrator:8080
       - CPU_CORES=4
       - RAM_GB=8
-      - S3_ENDPOINT_URL=http://localhost:9000
+      - S3_ENDPOINT_URL=http://minio:9000
       - S3_ACCESS_KEY=minioadmin
       - S3_SECRET_KEY=minioadmin
       - S3_DEFAULT_BUCKET=avtomatika-payloads
-      - OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
       - OTEL_SERVICE_NAME=cpu-worker-reliable
       - HOSTNAME=worker-cpu-2-node
+

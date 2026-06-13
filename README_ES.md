@@ -11,7 +11,7 @@ El ejemplo despliega un entorno distribuido completo:
 ![Blueprint Principal](docs/images/full_showcase_graph.png)
 
 1.  **Orchestrator**: El motor central que gestiona blueprints complejos con sub-trabajos anidados. Paquete `avtomatika` de PyPI.
-2.  **GPU Worker**: Demuestra tareas pesadas con **Informes de Progreso**, **Caché Caliente (Hot Cache)** y **Carga de Archivos a S3**. Paquete `avtomatika-worker` de PyPI.
+2.  **GPU Worker**: Demuestra tareas pesadas con **Informes de Progreso**, **Artefactos Instalados** y **Carga de Archivos a S3**. Paquete `avtomatika-worker` de PyPI.
 3.  **CPU Workers**: Dos ejecutores para análisis paralelo (uno confiable, uno inestable para pruebas de reputación).
 4.  **Webhook Receiver**: Servicio externo que recibe notificaciones de trabajos en tiempo real.
 5.  **Infraestructura**: Redis (estado), PostgreSQL (historial), MinIO (S3), VictoriaMetrics, Grafana y Jaeger.
@@ -27,29 +27,29 @@ Todo el descubrimiento de trabajadores está impulsado por Redis **Sorted Sets (
 Los trabajadores inactivos pueden "robar" tareas de las colas de los trabajadores ocupados para garantizar la máxima utilización. El sistema garantiza actualizaciones atómicas de `assigned_worker_id`.
 
 ### 3. Human-in-the-Loop (Aprobación Humana)
-Integración de `actions.await_human_approval()`. El pipeline se pausa al inicio, pasando al estado `waiting_for_human` hasta que se recibe una decisión externa `APPROVED` a través de la API Pública.
+Integración de `actions.await_human_approval()`. El pipeline se pausa al inicio, pasando al estado `waiting_for_human` hasta que se recibe una decisión externa `APPROVED` a través de la API Pública v1.
 
-
-### 2. Despacho Inteligente y Consciente de Costos
+### 4. Despacho Inteligente y Consciente de Costos
 *   **Restricciones de Recursos**: Tareas que requieren CPU/RAM específicos (usando lógica GE - Mayor o Igual).
-*   **Coincidencia de Caché Caliente**: Uso de `resource_hint` para apuntar a trabajadores que ya tienen activos específicos (ej. modelos de IA) precargados.
+*   **Targeting por Artefactos**: Uso de `installed_artifacts` para apuntar a trabajadores que ya tienen componentes específicos (ej. modelos de IA o ajustes preestablecidos) instalados.
 *   **Límites de Costo**: Restricción de tareas a trabajadores dentro de un rango de `max_cost`.
 *   **Tiempos de Espera (Timeouts)**: Control detallado de `dispatch_timeout` y `result_timeout`.
 
-### 3. Interacción Rica con el Trabajador
+### 5. Interacción Rica con el Trabajador
 *   **Progreso en Tiempo Real**: Trabajadores emitiendo `send_progress(0.33, "Procesando...")` visible vía API/WS.
 *   **Eventos de Trabajador Personalizados**: Emisión de eventos de negocio o hardware (ej. `gpu_thermal_status`) durante la ejecución de la tarea.
 *   **TaskFiles y S3**: Sincronización automática. Si un trabajador devuelve una ruta a un archivo creado vía `TaskFiles`, el SDK lo carga automáticamente a S3.
 
-### 4. Seguridad Zero-Trust
-*   Cada mensaje está firmado criptográficamente.
-*   El Orchestrator verifica las firmas de todos los actores, incluidos los eventos internos "Ghost" de los Blueprints.
-*   Protección contra repetición mediante marcas de tiempo obligatorias.
+### 6. Seguridad Zero-Trust (v1.0b26)
+*   **mTLS y STS**: Soporte para autenticación mTLS mutua y rotación automática de tokens a través del Security Token Service.
+*   **Firmas Criptográficas**: Cada mensaje está firmado con HMAC-SHA256.
+*   **Identity Chain**: Verificación de toda la cadena de identidad para evitar la suplantación de eventos.
+*   **Protección contra Replay**: Marcas de tiempo obligatorias para todos los mensajes del protocolo.
 
-### 5. Sintaxis de Blueprint Moderna
+### 7. Sintaxis de Blueprint Moderna
 *   **Enrutamiento Condicional**: Uso de decoradores `.when("condición")` para ramificación declarativa.
 *   **Nombres Inferidos**: Los nombres de los estados se derivan automáticamente de los nombres de las funciones.
-*   **Paralelismo**: Fácil `fan-out / fan-in` vía `actions.dispatch_parallel()`.
+*   **Paralelismo**: Fácil `fan-out / fan-in` vía `actions.dispatch_parallel()` con soporte para transiciones individuales.
 
 ## 🚀 Inicio Rápido
 
@@ -74,7 +74,8 @@ make init
 
 *   `blueprints/main.py`: Flujo complejo con aprobación humana, paralelismo y S3.
 *   `blueprints/sub.py`: Sintaxis moderna con condiciones `.when()`.
-*   `workers/gpu.py`: Trabajador avanzado con Progreso, Eventos y Caché Caliente.
+*   `blueprints/media/processor.py`: Ejemplo de sub-blueprint modular para limpieza de medios. ![Gráfico de Limpieza](docs/images/media_cleanup_graph.png)
+*   `workers/gpu.py`: Trabajador avanzado con Progreso, Eventos y Targeting por Artefactos.
 *   `workers/cpu_*.py`: Trabajadores simples para análisis y pruebas de reputación.
 
 ---

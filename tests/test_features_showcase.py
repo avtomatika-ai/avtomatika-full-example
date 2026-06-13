@@ -59,7 +59,7 @@ async def test_features_showcase():
         print("\n2. Testing Graph Tracing (origin_task_id)...")
         payload = {"initial_data": {"showcase": "tracing"}}
         async with session.post(
-            f"{API_URL}/api/submit/full_showcase", json=payload, headers=headers
+            f"{API_URL}/api/v1/submit/full_showcase", json=payload, headers=headers
         ) as resp:
             assert resp.status in [201, 202]
             job_id = (await resp.json())["job_id"]
@@ -70,6 +70,7 @@ async def test_features_showcase():
         async with session.post(
             f"{API_URL}/_public/webhooks/approval/{job_id}",
             json={"decision": "approved"},
+            headers=headers,
         ) as approve_resp:
             assert approve_resp.status == 200
             print("   Human step approved.")

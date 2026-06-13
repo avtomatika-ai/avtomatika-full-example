@@ -80,6 +80,6 @@ full-check: lint graph
 	@echo "🔍 Checking Docker Containers Health..."
 	docker compose ps
 	@echo "🚀 Running Comprehensive Integration Suite..."
-	$(PYTEST) -s tests/test_comprehensive.py
+	$(PYTEST) -s tests/
 	@echo "✅ ALL SYSTEMS VERIFIED"
 

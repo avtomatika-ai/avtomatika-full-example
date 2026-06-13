@@ -63,10 +63,10 @@ async def my_handler(param1, **kwargs):
 ### 2. Modifying Blueprints
 Blueprints are defined using a declarative syntax. You can add new states and transitions in `blueprints/main.py`.
 
-**Gold Standard Practices (Beta 21+):**
+**Gold Standard Practices (Beta 26+):**
 - **Explicit Parallel Transitions**: When using `actions.dispatch_parallel()`, always provide `transitions` for each task, even if they are aggregated. This ensures the worker service can process individual success/failure signals.
 - **Sub-Blueprint Outcomes**: When running sub-blueprints via `actions.run_blueprint()`, always use `success` and `failure` as keys in the `transitions` dictionary to match the Orchestrator's internal signaling.
-- **State History**: Use `actions.update_context()` to store intermediate results. In Beta 21, these are automatically moved to `state_history` for persistent archival.
+- **State History**: Use `actions.update_context()` to store intermediate results. In Beta 26, these are automatically moved to `state_history` for persistent archival.
 
 ```python
 @main_bp.handler("new_state")

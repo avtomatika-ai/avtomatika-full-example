@@ -6,3 +6,6 @@ token = "super-secret-cpu-worker-token"
 
 ["cpu-worker-02"]
 token = "super-secret-cpu-worker-token-2"
+
+["secure-worker-01"]
+token = "super-secret-secure-worker-token"

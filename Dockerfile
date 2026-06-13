@@ -13,7 +13,10 @@ RUN apt-get update && apt-get install -y \
 COPY pyproject.toml .
 COPY README.md .
 
-# Install python dependencies from PyPI
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
+
+# Install python dependencies
 RUN pip install --no-cache-dir .[test]
 
 # Copy the rest of the application code

@@ -13,19 +13,19 @@ maintenance_bp = Blueprint(
 async def maintenance_start(
     job_id: str, initial_data: dict[str, Any], actions: ActionFactory
 ):
-    """Entry point for the automated maintenance worker."""
     actions.go_to("run_cleanup")
+    return actions
 
 
 @maintenance_bp.handler("run_cleanup")
 async def run_cleanup(job_id: str, actions: ActionFactory):
-    """Dispatches a mock cleanup task."""
     actions.dispatch_task(
         task_type="analyze_file",
         skill_version="1.0.0",
         params={"target": "/tmp", "action": "purge"},
         transitions={"success": "finished", "failure": "failed"},
     )
+    return actions
 
 
 @maintenance_bp.handler("finished", is_end=True)
